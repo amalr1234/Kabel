@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# Virtual environments
+venv/
+.venv/
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+
+# Local databases and vector storage
+*.db
+chroma_data/
+
+# Node / Next.js
+node_modules/
+.next/
+frontend/out/
+
+# Logs
+*.log
+
+# Backup files
+*.backup
+*.before-*
+
+# Frontend backups / generated files
+frontend/src_backup_*/
+*.bak
+*.accidental-feedback-copy
+*.tsbuildinfo
+
