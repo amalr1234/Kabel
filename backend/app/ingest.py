@@ -2,30 +2,28 @@
 RAG ingestion pipeline for SOLVIA.
 
 Flow:
-  Source â†’ extraction â†’ cleaning â†’ normalization â†’ chunking â†’ metadata â†’ Gemini embeddings â†’ ChromaDB
+  Source -> extraction -> cleaning -> chunking -> metadata -> Gemini embeddings -> ChromaDB
 """
 from __future__ import annotations
 
-import os
 import re
-import uuid
-from typing import Optional
-from datetime import datetime, timezone
-
-from chromadb import Documents, EmbeddingFunction, Embeddings
-from pydantic import BaseModel
+from pathlib import Path
 
 from app.chroma import get_or_create_collection
-from app.gemini import get_genai_client, is_demo_mode, settings
-from app.database import SessionLocal
-from app.models import Ticket, Document
+from app.embeddings import GeminiEmbeddingFunction
+from app.models import Document, Ticket
+from app.sap_signals import extract_signals, merge_signal_fields, pack_token_chunks, split_heading_blocks
 
 TICKET_COLLECTION = "solvia_tickets"
 DOCUMENT_COLLECTION = "solvia_documents"
 
+# ~400 tokens / ~60 token overlap using a 4-chars-per-token heuristic.
+CHUNK_TOKENS = 400
+CHUNK_OVERLAP_TOKENS = 60
+
 
 # ---------------------------------------------------------------------------
-# Cleaning / normalization helpers
+# Text helpers
 # ---------------------------------------------------------------------------
 
 def clean_text(text: str) -> str:
@@ -33,190 +31,147 @@ def clean_text(text: str) -> str:
     if not text:
         return ""
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    # collapse multiple blank lines
     text = re.sub(r"\n{3,}", "\n\n", text)
-    # collapse spaces/tabs
     text = re.sub(r"[ \t]+", " ", text)
     return text.strip()
 
 
-def normalize_whitespace(text: str) -> str:
-    return clean_text(text)
-
-
-# ---------------------------------------------------------------------------
-# Chunking
-# ---------------------------------------------------------------------------
-
-CHUNK_SIZE = 800          # characters per chunk (heuristic)
-CHUNK_OVERLAP = 120       # overlap between consecutive chunks
-
-
-def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
-    """Split text into overlapping chunks of roughly `chunk_size` characters.
-
-    Tries paragraph boundaries first, then falls back to fixed-size splitting.
-    """
+def chunk_text(text: str, chunk_size: int = CHUNK_TOKENS, overlap: int = CHUNK_OVERLAP_TOKENS) -> list[str]:
+    """Split on headings/paragraphs, then pack into token-sized overlapping chunks."""
     if not text:
         return []
-    text = clean_text(text)
-    chunks: list[str] = []
+    blocks = split_heading_blocks(clean_text(text))
+    chunks = pack_token_chunks(blocks, target_tokens=chunk_size, overlap_tokens=overlap)
+    return [c for c in chunks if c.strip()]
 
-    # Prefer splitting on paragraph breaks
-    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
-    current: list[str] = []
-    current_len = 0
 
-    for para in paragraphs:
-        para_len = len(para) + 1  # account for space/newline
-        if current_len + para_len > chunk_size and current:
-            chunks.append(" ".join(current))
-            # keep overlap: retain tail of current
-            overlap_text = " ".join(current[-2:]) if len(current) >= 2 else ""
-            current = [overlap_text, para] if overlap_text else [para]
-            current_len = sum(len(x) for x in current) + len(current) - 1
-        else:
-            current.append(para)
-            current_len += para_len
-
-    if current:
-        chunks.append(" ".join(current))
-
-    # If paragraph chunking produced nothing useful, fall back to fixed-size
+def ticket_chunks(ticket: Ticket) -> list[str]:
+    """Keep the resolution attached to every symptom chunk so retrieval never
+    returns a problem without its fix.
+    """
+    symptom = clean_text(f"{ticket.title}\n\n{ticket.description or ''}")
+    resolution = clean_text(ticket.resolution or "")
+    chunks = chunk_text(symptom) if symptom else []
+    if not resolution:
+        return chunks
     if not chunks:
-        for i in range(0, len(text), chunk_size - overlap):
-            chunk = text[i : i + chunk_size]
-            if chunk.strip():
-                chunks.append(chunk)
+        return [f"{symptom}\n\nResolution:\n{resolution}".strip()]
+    return [f"{chunk}\n\nResolution:\n{resolution}" for chunk in chunks]
 
-    return chunks
+
+def extract_file_text(path: str | Path, fallback: str = "") -> str:
+    file_path = Path(path)
+    try:
+        if file_path.suffix.lower() == ".pdf":
+            from pypdf import PdfReader
+
+            reader = PdfReader(str(file_path))
+            return clean_text("\n\n".join(page.extract_text() or "" for page in reader.pages))
+        return clean_text(file_path.read_text(encoding="utf-8", errors="ignore"))
+    except Exception:
+        return clean_text(fallback)
 
 
 # ---------------------------------------------------------------------------
 # Metadata helpers
 # ---------------------------------------------------------------------------
 
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+def chroma_meta(values: dict) -> dict:
+    """Chroma metadata only accepts str/int/float/bool (no None)."""
+    return {
+        key: "" if value is None else value if isinstance(value, (bool, int, float)) else str(value)
+        for key, value in values.items()
+    }
 
 
-def ticket_metadata(
-    ticket: Ticket,
-    chunk_index: int,
-    total_chunks: int,
-    chunk_preview: str,
-) -> dict:
+def _iso(value) -> str:
+    return value.isoformat() if value else ""
+
+
+def ticket_signals(ticket: Ticket):
+    return merge_signal_fields(
+        " ".join([ticket.title or "", ticket.description or "", ticket.resolution or ""]),
+        ticket.sap_notes,
+        ticket.transactions,
+        ticket.error_codes,
+    )
+
+
+def ticket_metadata(ticket: Ticket) -> dict:
     return {
         "source_type": "ticket",
         "ticket_id": ticket.ticket_id,
         "title": ticket.title,
-        "category": ticket.category or "",
-        "system": ticket.system or "",
-        "priority": ticket.priority or "",
-        "status": ticket.status or "",
-        "resolver": ticket.resolver or "",
+        "category": ticket.category,
+        "system": ticket.system,
+        "priority": ticket.priority,
+        "status": ticket.status,
+        "resolver": ticket.resolver,
         "resolution_time_hours": ticket.resolution_time_hours,
         "source": ticket.source or "ServiceNow",
         "source_reliability": ticket.source_reliability if ticket.source_reliability is not None else 0.90,
-        "chunk_index": chunk_index,
-        "total_chunks": total_chunks,
-        "created_at": ticket.created_at.isoformat() if ticket.created_at else "",
-        "resolved_at": ticket.resolved_at.isoformat() if ticket.resolved_at else "",
-        "chunk_preview": chunk_preview[:200],
+        "feedback_score": ticket.feedback_score if ticket.feedback_score is not None else 0.5,
+        "created_at": _iso(ticket.created_at),
+        "resolved_at": _iso(ticket.resolved_at),
+        **ticket_signals(ticket).as_meta(),
     }
 
 
-def document_metadata(
-    document: Document,
-    chunk_index: int,
-    total_chunks: int,
-    chunk_preview: str,
-) -> dict:
+def document_metadata(document: Document, text: str) -> dict:
     return {
-        "source_type": "document",
+        "source_type": document.source_type or "document",
         "document_id": document.document_id,
         "title": document.title,
-        "category": document.category or "",
-        "system": document.system or "",
-        "source_type_label": document.source_type or "",
-        "chunk_index": chunk_index,
-        "total_chunks": total_chunks,
-        "chunk_preview": chunk_preview[:200],
+        "category": document.category,
+        "system": document.system,
+        "status": "",
+        "feedback_score": 0.5,
+        **extract_signals(f"{document.title or ''} {text}").as_meta(),
     }
 
 
 # ---------------------------------------------------------------------------
-# Embedding function for ChromaDB
+# Chroma chunk storage
 # ---------------------------------------------------------------------------
 
-class GeminiEmbeddingFunction(EmbeddingFunction[Documents]):
-    """ChromaDB embedding function that calls Gemini embeddings.
-
-    Uses the configured ``GEMINI_EMBEDDING_MODEL``. In demo mode, returns a
-    deterministic hash-based fake embedding so local development works without
-    an API key.
-    """
-
-    def __init__(self):
-        self._model = settings.gemini_embedding_model or "gemini-embedding-001"
-
-    def __call__(self, input: Documents) -> Embeddings:
-        if is_demo_mode():
-            return _demo_embeddings(input)
-
-        client = get_genai_client()
-        if client is None:
-            return _demo_embeddings(input)
-
-        dims = _embedding_dims()
-
-        if isinstance(input, str):
-            input_list = [input]
-        else:
-            input_list = list(input)
-
-        embeddings: list[list[float]] = []
-        for text in input_list:
-            try:
-                emb = client.models.embed_content(model=self._model, contents=[text])
-                vec = emb.embeddings[0].values if emb.embeddings else []
-            except Exception as exc:
-                # Fail safe: return a real placeholder embedding instead of
-                # all-zero vectors, so ChromaDB distance/retrieval semantics stay
-                # interpretable even when the Gemini embedding call fails.
-                vec = _demo_embedding(text)
-            if not vec:
-                vec = _zero_embedding(dims)
-            embeddings.append(vec[:dims] if len(vec) >= dims else vec + [0.0] * (dims - len(vec)))
-        return embeddings
-
-    def __repr__(self) -> str:
-        return f"GeminiEmbeddingFunction(model={self._model!r})"
+def _collection(name: str):
+    return get_or_create_collection(name, embedding_function=GeminiEmbeddingFunction())
 
 
-def _embedding_dims() -> int:
-    # gemini-embedding-001 produces 1536-dimensional vectors.
-    return 1536
+def _delete_chunks(collection_name: str, id_key: str, source_id: str) -> None:
+    try:
+        _collection(collection_name).delete(where={id_key: source_id})
+    except Exception:
+        pass
 
 
-def _zero_embedding(dims: int) -> list[float]:
-    return [0.0] * dims
+def _replace_chunks(
+    collection_name: str,
+    id_key: str,
+    id_prefix: str,
+    chunks: list[str],
+    base_meta: dict,
+) -> None:
+    """Delete stale chunks for the source, then upsert the fresh ones."""
+    source_id = base_meta[id_key]
+    _delete_chunks(collection_name, id_key, source_id)
+    total = len(chunks)
+    _collection(collection_name).upsert(
+        ids=[f"{id_prefix}-{source_id}-c{idx}" for idx in range(total)],
+        documents=chunks,
+        metadatas=[
+            chroma_meta({**base_meta, "chunk_index": idx, "total_chunks": total, "chunk_preview": chunk[:200]})
+            for idx, chunk in enumerate(chunks)
+        ],
+    )
 
 
-def _demo_embeddings(input: Documents) -> Embeddings:
-    """Deterministic hash-based placeholder embeddings for demo mode."""
-    if isinstance(input, str):
-        inputs = [input]
-    else:
-        inputs = list(input)
-    out: list[list[float]] = []
-    for text in inputs:
-        h = hash(text)
-        vec = []
-        for i in range(_embedding_dims()):
-            vec.append(float((h >> (i % 32)) & 0xFFFF) / 0xFFFF)
-        out.append(vec)
-    return out
+def delete_ticket_chunks(ticket_id: str) -> None:
+    _delete_chunks(TICKET_COLLECTION, "ticket_id", ticket_id)
+
+
+def delete_document_chunks(document_id: str) -> None:
+    _delete_chunks(DOCUMENT_COLLECTION, "document_id", document_id)
 
 
 # ---------------------------------------------------------------------------
@@ -224,36 +179,17 @@ def _demo_embeddings(input: Documents) -> Embeddings:
 # ---------------------------------------------------------------------------
 
 def ingest_ticket(ticket: Ticket, db_session) -> dict:
-    """Ingest a single ticket into ChromaDB as chunks with metadata.
-
-    Returns a summary with document_id, chunk count, and status.
-    """
-    text = f"{ticket.title}\n\n{ticket.description}\n\nResolution:\n{ticket.resolution or ''}"
-    text = clean_text(text)
-    if not text.strip():
+    """Re-embed a ticket into ChromaDB and persist the extracted SAP signals."""
+    chunks = ticket_chunks(ticket)
+    if not chunks:
         return {"status": "skipped", "reason": "empty content", "ticket_id": ticket.ticket_id}
 
-    chunks = chunk_text(text)
-    if not chunks:
-        return {"status": "skipped", "reason": "no chunks produced", "ticket_id": ticket.ticket_id}
+    for field, value in ticket_signals(ticket).as_meta().items():
+        setattr(ticket, field, value or None)
+    if ticket.feedback_score is None:
+        ticket.feedback_score = 0.5
 
-    collection = get_or_create_collection(TICKET_COLLECTION, embedding_function=GeminiEmbeddingFunction())
-
-    docs: list[str] = []
-    metas: list[dict] = []
-    ids: list[str] = []
-
-    for idx, chunk in enumerate(chunks):
-        chunk_id = f"ticket-{ticket.ticket_id}-c{idx}"
-        docs.append(chunk)
-        metas.append(ticket_metadata(ticket, idx, len(chunks), chunk))
-        ids.append(chunk_id)
-
-    # Upsert chunks (idempotent by chunk id)
-    collection.upsert(documents=docs, metadatas=metas, ids=ids)
-
-    # Record chunk count on the document/ticket metadata row (reuse Ticket row)
-    ticket.resolution = ticket.resolution  # no-op to ensure object is tracked
+    _replace_chunks(TICKET_COLLECTION, "ticket_id", "ticket", chunks, ticket_metadata(ticket))
     db_session.add(ticket)
     db_session.commit()
 
@@ -262,37 +198,30 @@ def ingest_ticket(ticket: Ticket, db_session) -> dict:
         "ticket_id": ticket.ticket_id,
         "chunk_count": len(chunks),
         "collection": TICKET_COLLECTION,
+        "sap_notes": ticket.sap_notes or "",
+        "transactions": ticket.transactions or "",
+        "error_codes": ticket.error_codes or "",
     }
 
 
 def ingest_document(document: Document, db_session) -> dict:
-    """Ingest a single document into ChromaDB as chunks with metadata.
+    """Re-embed a document into ChromaDB.
 
-    ``document.metadata_json`` may contain additional source info; this function
-    does not parse the file itself â€” the caller should have extracted text.
+    Text comes from ``document.file_path`` when the file exists, otherwise from
+    ``document.metadata_json``.
     """
     text = clean_text(document.metadata_json or "")
-    if not text.strip():
-        return {"status": "skipped", "reason": "empty content", "document_id": document.document_id}
+    if document.file_path and Path(document.file_path).exists():
+        extracted = extract_file_text(document.file_path, fallback=text)
+        if extracted:
+            text = extracted
+            document.metadata_json = extracted
 
     chunks = chunk_text(text)
     if not chunks:
-        return {"status": "skipped", "reason": "no chunks produced", "document_id": document.document_id}
+        return {"status": "skipped", "reason": "empty content", "document_id": document.document_id}
 
-    collection = get_or_create_collection(DOCUMENT_COLLECTION, embedding_function=GeminiEmbeddingFunction())
-
-    docs: list[str] = []
-    metas: list[dict] = []
-    ids: list[str] = []
-
-    for idx, chunk in enumerate(chunks):
-        chunk_id = f"doc-{document.document_id}-c{idx}"
-        docs.append(chunk)
-        metas.append(document_metadata(document, idx, len(chunks), chunk))
-        ids.append(chunk_id)
-
-    collection.upsert(documents=docs, metadatas=metas, ids=ids)
-
+    _replace_chunks(DOCUMENT_COLLECTION, "document_id", "doc", chunks, document_metadata(document, text))
     document.chunk_count = len(chunks)
     db_session.add(document)
     db_session.commit()
@@ -303,62 +232,3 @@ def ingest_document(document: Document, db_session) -> dict:
         "chunk_count": len(chunks),
         "collection": DOCUMENT_COLLECTION,
     }
-
-
-def ingest_ticket_direct(
-    ticket_id: str,
-    title: str,
-    description: str,
-    category: Optional[str] = None,
-    system: Optional[str] = None,
-    priority: Optional[str] = None,
-    status: Optional[str] = None,
-    resolution: Optional[str] = None,
-    resolver: Optional[str] = None,
-    resolution_time_hours: Optional[float] = None,
-) -> dict:
-    """Convenience: create + ingest a ticket in one call (uses a DB session)."""
-    with SessionLocal() as db:
-        ticket = Ticket(
-            ticket_id=ticket_id,
-            title=title,
-            description=description,
-            category=category,
-            system=system,
-            priority=priority,
-            status=status or "resolved",
-            resolution=resolution,
-            resolver=resolver,
-            resolution_time_hours=resolution_time_hours,
-        )
-        db.add(ticket)
-        db.commit()
-        db.refresh(ticket)
-        return ingest_ticket(ticket, db)
-
-
-def ingest_document_direct(
-    document_id: str,
-    title: str,
-    source_type: str,
-    category: Optional[str] = None,
-    system: Optional[str] = None,
-    file_path: Optional[str] = None,
-    metadata_json: Optional[str] = None,
-) -> dict:
-    """Convenience: create + ingest a document in one call."""
-    with SessionLocal() as db:
-        document = Document(
-            document_id=document_id,
-            title=title,
-            source_type=source_type,
-            category=category,
-            system=system,
-            file_path=file_path,
-            metadata_json=metadata_json,
-        )
-        db.add(document)
-        db.commit()
-        db.refresh(document)
-        return ingest_document(document, db)
-

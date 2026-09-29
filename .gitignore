@@ -16,6 +16,7 @@ venv/
 # Local databases and vector storage
 *.db
 chroma_data/
+backend/uploads/
 
 # Node / Next.js
 node_modules/

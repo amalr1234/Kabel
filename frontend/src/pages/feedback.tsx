@@ -3,26 +3,12 @@ import type { NextPage } from "next";
 import Layout from "@/components/Layout";
 import PageHeader from "@/components/PageHeader";
 import ErrorAlert from "@/components/ErrorAlert";
-import { api, type FeedbackRequest } from "@/lib/api";
+import { api, errorMessage, type FeedbackRequest, type SolutionResponse } from "@/lib/api";
+import { STORAGE_KEYS } from "@/lib/constants";
 
-type Rating = "helpful" | "not_helpful" | "verify_commit" | "";
+type Rating = FeedbackRequest["rating"] | "";
 
-type StoredSolution = {
-  solution_id?: string;
-  solutionId?: string;
-  id?: string;
-  solution_title?: string;
-  title?: string;
-  confidence?: string;
-  match_score?: number;
-  matchScore?: number;
-  evidence?: Array<{
-    source?: string;
-    source_type?: string;
-    ticket_id?: string;
-    document_id?: string;
-  }>;
-};
+type StoredSolution = Partial<SolutionResponse>;
 
 const Page: NextPage = () => {
   const [solutionId, setSolutionId] = useState("");
@@ -36,18 +22,15 @@ const Page: NextPage = () => {
 
   useEffect(() => {
     try {
-      const raw = window.localStorage.getItem("solvia:last-solution");
+      const raw = window.localStorage.getItem(STORAGE_KEYS.lastSolution);
 
       if (!raw) return;
 
       const parsed = JSON.parse(raw) as StoredSolution;
       setSavedSolution(parsed);
 
-      const detectedId =
-        parsed.solution_id || parsed.solutionId || parsed.id || "";
-
-      if (detectedId) {
-        setSolutionId(detectedId);
+      if (parsed.solution_id) {
+        setSolutionId(parsed.solution_id);
       }
     } catch (restoreError) {
       console.warn("Unable to restore saved solution", restoreError);
@@ -72,19 +55,15 @@ const Page: NextPage = () => {
       await api.postFeedback(payload);
       setSubmitted(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
   };
 
-  const solutionTitle =
-    savedSolution?.solution_title ||
-    savedSolution?.title ||
-    "SOLVIA recommendation";
+  const solutionTitle = savedSolution?.solution_title || "SOLVIA recommendation";
 
-  const matchScore =
-    savedSolution?.match_score ?? savedSolution?.matchScore ?? null;
+  const matchScore = savedSolution?.match_score ?? null;
 
   const confidence = savedSolution?.confidence || "Not available";
 
@@ -274,8 +253,9 @@ const Page: NextPage = () => {
 
               <div className="flex flex-col-reverse gap-4 border-t border-white/[0.08] pt-5 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-xs leading-5 text-slate-500">
-                  Feedback is recorded for audit and analytics only. It does
-                  not execute SAP operations.
+                  Helpful / Not Helpful changes ranking of cited tickets.
+                  Verify & Commit also writes a resolved ticket back into the
+                  knowledge library.
                 </p>
 
                 <button
@@ -386,8 +366,8 @@ function RelatedSection() {
       </ul>
 
       <div className="mt-5 border-t border-white/[0.08] pt-4 text-xs leading-5 text-slate-500">
-        Verify & Commit records human validation only. It does not execute SAP
-        operations.
+        Verify & Commit does not execute SAP operations. It stores a resolved
+        ticket and re-embeds it so later searches can reuse the proven fix.
       </div>
     </section>
   );

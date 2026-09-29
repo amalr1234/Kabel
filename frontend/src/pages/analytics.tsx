@@ -5,6 +5,7 @@ import LoadingState from "@/components/LoadingState";
 import ErrorAlert from "@/components/ErrorAlert";
 import {
   api,
+  errorMessage,
   type AnalyticsSolutionUsage,
   type AnalyticsFeedbackScores,
 } from "@/lib/api";
@@ -29,7 +30,7 @@ const Page: NextPage = () => {
       setUsage(usageResult);
       setScores(scoresResult);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setLoading(false);
     }

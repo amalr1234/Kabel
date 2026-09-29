@@ -64,7 +64,7 @@ def test_l2_to_match_score_is_monotone() -> None:
 def test_score_candidate_matchesDistanceFormula() -> None:
     for l2 in (10.0, 100.0, 200.0, 400.0, 700.0):
         raw = l2_to_match_score(l2)
-        scored = score_candidate({"distance": l2, "sys": "", "cat": ""}, None, None)
+        scored = score_candidate({"distance": l2, "system": "", "category": ""}, None, None)
         assert scored == raw, f"l2={l2}: score_candidate={scored}, expected={raw}"
 
 
@@ -72,13 +72,13 @@ def test_score_candidate_adds_metadata_bonus() -> None:
     base_l2 = 200.0
     base = l2_to_match_score(base_l2)
 
-    with_sys = score_candidate({"distance": base_l2, "sys": "SAP", "cat": ""}, "SAP", None)
+    with_sys = score_candidate({"distance": base_l2, "system": "SAP", "category": ""}, "SAP", None)
     assert with_sys > base
 
-    with_cat = score_candidate({"distance": base_l2, "sys": "", "cat": "authentication"}, None, "authentication")
+    with_cat = score_candidate({"distance": base_l2, "system": "", "category": "authentication"}, None, "authentication")
     assert with_cat > base
 
-    with_both = score_candidate({"distance": base_l2, "sys": "SAP", "cat": "authentication"}, "SAP", "authentication")
+    with_both = score_candidate({"distance": base_l2, "system": "SAP", "category": "authentication"}, "SAP", "authentication")
     assert with_both > with_sys
     assert with_both > with_cat
 

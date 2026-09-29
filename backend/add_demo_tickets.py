@@ -17,7 +17,7 @@ tickets = [
     {
         "ticket_id": "T-DEMO-002",
         "title": "ABAP user receives authorization error",
-        "description": "An ABAP user receives an authorization error when executing a custom report.",
+        "description": "An ABAP user receives an authorization error when executing a custom report. SU53 shows a missing object. SAP Note 1234567 was referenced in a previous resolution.",
         "system": "ABAP",
         "category": "authorization",
         "priority": "critical",
@@ -94,7 +94,7 @@ tickets = [
     {
         "ticket_id": "T-DEMO-009",
         "title": "HANA high memory consumption",
-        "description": "The HANA database reports high memory consumption and application queries are becoming slow.",
+        "description": "The HANA database reports high memory consumption and application queries are becoming slow. ST03N and ST22 dumps appear during peak load. Related SAP Note 2345678.",
         "system": "HANA",
         "category": "performance",
         "priority": "critical",

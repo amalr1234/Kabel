@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field
-from typing import Optional, List
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from typing import Annotated, Optional, List
 from datetime import datetime
 
 
@@ -29,14 +29,6 @@ class ConfidenceBreakdown(BaseModel):
     historical_success_rate: int
     source_reliability: int
     recency_factor: int
-
-    def to_dict(self) -> dict:
-        return {
-            "semantic_similarity": self.semantic_similarity,
-            "historical_success_rate": self.historical_success_rate,
-            "source_reliability": self.source_reliability,
-            "recency_factor": self.recency_factor,
-        }
 
 
 class SolutionResponse(BaseModel):
@@ -74,6 +66,8 @@ class AuditListResponse(BaseModel):
 # Ticket and Document schemas mirror the SQLAlchemy models so the API can accept and return them.
 
 class Ticket(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: Optional[int] = None
     ticket_id: str
     title: str
@@ -90,13 +84,14 @@ class Ticket(BaseModel):
     feedback_score: Optional[float] = None
     source: Optional[str] = None
     source_reliability: Optional[float] = None
-
-
-    class Config:
-        from_attributes = True
+    sap_notes: Optional[str] = None
+    transactions: Optional[str] = None
+    error_codes: Optional[str] = None
 
 
 class Document(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: Optional[int] = None
     document_id: str
     title: str
@@ -109,16 +104,42 @@ class Document(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
-
 
 class Feedback(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: Optional[int] = None
     solution_id: str
     rating: str
     notes: Optional[str] = None
+    committed_ticket_id: Optional[str] = None
     created_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+
+RequiredText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
+
+class KnowledgeIngestTicket(BaseModel):
+    ticket_id: RequiredText
+    title: RequiredText
+    description: RequiredText
+    category: Optional[str] = None
+    system: Optional[str] = None
+    priority: Optional[str] = None
+    status: Optional[str] = "resolved"
+    resolution: Optional[str] = None
+    resolver: Optional[str] = None
+    sap_notes: Optional[str] = None
+    transactions: Optional[str] = None
+    error_codes: Optional[str] = None
+
+
+class KnowledgeIngestDocument(BaseModel):
+    document_id: RequiredText
+    title: RequiredText
+    source_type: str = "document"
+    category: Optional[str] = None
+    system: Optional[str] = None
+    file_path: Optional[str] = None
+    text: RequiredText
+

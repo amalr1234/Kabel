@@ -30,9 +30,12 @@ class Ticket(Base):
     resolved_at = Column(DateTime(timezone=True), nullable=True)
     resolver = Column(String, nullable=True)
     resolution_time_hours = Column(Float, nullable=True)
-    feedback_score = Column(Float, nullable=True)
+    feedback_score = Column(Float, nullable=True, default=0.5)
     source = Column(String, default="ServiceNow", nullable=True)
     source_reliability = Column(Float, default=0.90, nullable=True)
+    sap_notes = Column(String, nullable=True)
+    transactions = Column(String, nullable=True)
+    error_codes = Column(String, nullable=True)
 
 
 class Document(Base):
@@ -58,6 +61,7 @@ class Feedback(Base):
     solution_id = Column(String, nullable=False, index=True)
     rating = Column(String, nullable=False)
     notes = Column(Text, nullable=True)
+    committed_ticket_id = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -80,5 +84,10 @@ class SolutionUsage(Base):
     match_score = Column(Integer, nullable=False)
     confidence = Column(String, nullable=False)
     feedback_rating = Column(String, nullable=True)
+    evidence_json = Column(Text, nullable=True)
+    solution_title = Column(String, nullable=True)
+    blueprint_json = Column(Text, nullable=True)
+    query_system = Column(String, nullable=True)
+    query_category = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

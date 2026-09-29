@@ -3,10 +3,16 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 
 from app.database import get_db
-from app.models import SolutionUsage, Feedback, AuditLog
-from app.schemas import AuditEntry, AuditListResponse
+from app.models import SolutionUsage, Feedback
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
+
+
+def _feedback_by_rating(db: Session) -> dict[str, int]:
+    rows = db.execute(
+        select(Feedback.rating, func.count(Feedback.id)).group_by(Feedback.rating)
+    ).all()
+    return {rating: count for rating, count in rows}
 
 
 @router.get("/solution-usage")
@@ -17,56 +23,21 @@ def solution_usage_stats(db: Session = Depends(get_db)):
         select(SolutionUsage.confidence, func.count(SolutionUsage.id))
         .group_by(SolutionUsage.confidence)
     ).all()
-    by_feedback = db.execute(
-        select(Feedback.rating, func.count(Feedback.id))
-        .group_by(Feedback.rating)
-    ).all()
 
     return {
         "total_solutions": total,
         "by_confidence": {k: v for k, v in by_confidence},
-        "by_feedback": {k: v for k, v in by_feedback},
+        "by_feedback": _feedback_by_rating(db),
     }
 
 
 @router.get("/feedback-scores")
 def feedback_scores(db: Session = Depends(get_db)):
     """Return feedback scoring summary."""
-    total = db.execute(select(func.count(Feedback.id))).scalar() or 0
-    helpful = db.execute(
-        select(func.count(Feedback.id)).where(Feedback.rating == "helpful")
-    ).scalar() or 0
-    not_helpful = db.execute(
-        select(func.count(Feedback.id)).where(Feedback.rating == "not_helpful")
-    ).scalar() or 0
-    verify_commit = db.execute(
-        select(func.count(Feedback.id)).where(Feedback.rating == "verify_commit")
-    ).scalar() or 0
+    counts = _feedback_by_rating(db)
     return {
-        "total": total,
-        "helpful": helpful,
-        "not_helpful": not_helpful,
-        "verify_commit": verify_commit,
+        "total": sum(counts.values()),
+        "helpful": counts.get("helpful", 0),
+        "not_helpful": counts.get("not_helpful", 0),
+        "verify_commit": counts.get("verify_commit", 0),
     }
-
-
-@router.get("/audit")
-def audit_events(limit: int = 50, offset: int = 0, event_type: str = None, db: Session = Depends(get_db)):
-    stmt = select(AuditLog).order_by(AuditLog.created_at.desc())
-    if event_type:
-        stmt = stmt.where(AuditLog.event_type == event_type)
-    result = db.execute(stmt.offset(offset).limit(limit))
-    entries = result.scalars().all()
-    return AuditListResponse(
-        entries=[
-            AuditEntry(
-                id=e.id,
-                event_type=e.event_type,
-                actor=e.actor,
-                detail=e.detail,
-                created_at=e.created_at.isoformat(),
-            )
-            for e in entries
-        ],
-        total=len(entries),
-    )

@@ -1,20 +1,20 @@
+from functools import lru_cache
+
 from app.settings import get_settings
 
 settings = get_settings()
 
 
-def build_genai_client():
-    from google import genai
+def is_demo_mode() -> bool:
+    return not settings.gemini_available
 
-    if settings.demo_mode or not settings.gemini_api_key:
+
+@lru_cache(maxsize=1)
+def get_genai_client():
+    """Return a shared Gemini client, or ``None`` in demo mode / without an API key."""
+    if is_demo_mode():
         return None
 
+    from google import genai
+
     return genai.Client(api_key=settings.gemini_api_key)
-
-
-def get_genai_client():
-    return build_genai_client()
-
-
-def is_demo_mode() -> bool:
-    return bool(settings.demo_mode or not settings.gemini_api_key)
