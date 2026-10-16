@@ -12,8 +12,7 @@ import {
 
 const Page: NextPage = () => {
   const [usage, setUsage] = React.useState<AnalyticsSolutionUsage | null>(null);
-  const [scores, setScores] =
-    React.useState<AnalyticsFeedbackScores | null>(null);
+  const [scores, setScores] = React.useState<AnalyticsFeedbackScores | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -56,18 +55,16 @@ const Page: NextPage = () => {
         </div>
 
         <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-400">
-          Monitor SOLVIA usage, recommendation confidence and human feedback
-          across the local enterprise workspace.
+          Monitor SOLVIA usage, recommendation confidence, human feedback, and knowledge gaps across enterprise systems.
         </p>
       </section>
 
       {loading && <LoadingState message="Loading impact analytics..." />}
-
       {error && <ErrorAlert message={error} onRetry={load} />}
 
       {!loading && !error && usage && scores && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
             <AnalyticsMetric
               label="Total solutions"
               value={usage.total_solutions}
@@ -83,6 +80,13 @@ const Page: NextPage = () => {
             />
 
             <AnalyticsMetric
+              label="Verify & commit"
+              value={scores.verify_commit}
+              sub="human-validated"
+              accent="amber"
+            />
+
+            <AnalyticsMetric
               label="Not helpful"
               value={scores.not_helpful}
               sub={percentage(scores.not_helpful, feedbackTotal)}
@@ -90,9 +94,9 @@ const Page: NextPage = () => {
             />
 
             <AnalyticsMetric
-              label="Verify & commit"
-              value={scores.verify_commit}
-              sub="human-validated"
+              label="Knowledge Gaps"
+              value={`${usage.gap_frequency_rate ?? 0}%`}
+              sub={`${usage.gap_count ?? 0} queries flagged`}
               accent="amber"
             />
           </div>
@@ -119,16 +123,15 @@ const Page: NextPage = () => {
             <div className="flex flex-col items-center justify-between gap-6 text-center sm:flex-row sm:text-left">
               <div>
                 <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-violet-300">
-                  Intelligence loop
+                  Continuous Improvement
                 </div>
 
                 <h2 className="mt-2 text-xl font-semibold text-white">
-                  Evidence, action and human validation
+                  Knowledge Gap Alerts & Telemetry
                 </h2>
 
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-400">
-                  SOLVIA recommendations become more useful when consultants
-                  record whether the evidence and remediation path were useful.
+                  A high knowledge gap rate highlights missing documentation or undocumented incident types, indicating where technical teams should author new runbooks.
                 </p>
               </div>
 
@@ -137,7 +140,7 @@ const Page: NextPage = () => {
                   {feedbackTotal}
                 </div>
                 <div className="mt-1 text-[10px] uppercase tracking-[0.16em] text-slate-500">
-                  Human signals
+                  Human signals recorded
                 </div>
               </div>
             </div>
@@ -155,7 +158,7 @@ function AnalyticsMetric({
   accent,
 }: {
   label: string;
-  value: number;
+  value: number | string;
   sub: string;
   accent: "indigo" | "emerald" | "rose" | "amber";
 }) {
@@ -249,9 +252,10 @@ function BreakdownCard({
 
                 <div className="h-2 overflow-hidden rounded-full bg-slate-800">
                   <div
-                    className={`h-full rounded-full bg-gradient-to-r ${
-                      getBarColor(key, type)
-                    }`}
+                    className={`h-full rounded-full bg-gradient-to-r ${getBarColor(
+                      key,
+                      type
+                    )}`}
                     style={{ width: `${percentageValue}%` }}
                   />
                 </div>

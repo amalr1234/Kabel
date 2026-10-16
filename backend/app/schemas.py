@@ -1,6 +1,8 @@
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
-from typing import Annotated, Optional, List
+from __future__ import annotations
+
 from datetime import datetime
+from typing import Annotated, List, Literal, Optional
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 
 class SolutionQuery(BaseModel):
@@ -44,10 +46,52 @@ class SolutionResponse(BaseModel):
     requires_human_review: bool
 
 
+# ---------------------------------------------------------------------------
+# Structured Output Schemas for Gemini GenAI SDK
+# ---------------------------------------------------------------------------
+
+class GeminiEvidenceCitation(BaseModel):
+    ticket_id: Optional[str] = None
+    document_id: Optional[str] = None
+    source_type: str = "ticket"
+    title: str = ""
+    snippet: str = ""
+    system: Optional[str] = None
+    category: Optional[str] = None
+    match_score: float = 0.0
+    reason: str = ""
+
+
+class GeminiSolutionOutput(BaseModel):
+    solution_title: str
+    match_score: int
+    confidence: Literal["high", "medium", "low"]
+    reasoning: str
+    execution_blueprint: List[str]
+    evidence: List[GeminiEvidenceCitation]
+    knowledge_gaps: List[str]
+    requires_human_review: bool = True
+
+
+# ---------------------------------------------------------------------------
+# Operational & Feedback Schemas
+# ---------------------------------------------------------------------------
+
 class FeedbackRequest(BaseModel):
     solution_id: str
     rating: str = Field(..., pattern="^(helpful|not_helpful|verify_commit)$")
     notes: Optional[str] = None
+
+
+class Feedback(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: Optional[int] = None
+    solution_id: str
+    rating: str
+    notes: Optional[str] = None
+    committed_ticket_id: Optional[str] = None
+    created_at: Optional[datetime] = None
 
 
 class AuditEntry(BaseModel):
@@ -63,7 +107,20 @@ class AuditListResponse(BaseModel):
     total: int
 
 
-# Ticket and Document schemas mirror the SQLAlchemy models so the API can accept and return them.
+class AnalyticsSolutionUsage(BaseModel):
+    total_solutions: number = 0 if False else int
+    by_confidence: dict[str, int]
+    by_feedback: dict[str, int]
+    gap_count: int = 0
+    gap_frequency_rate: float = 0.0
+
+
+class AnalyticsFeedbackScores(BaseModel):
+    total: int
+    helpful: int
+    not_helpful: int
+    verify_commit: int
+
 
 class Ticket(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -105,17 +162,6 @@ class Document(BaseModel):
     updated_at: Optional[datetime] = None
 
 
-class Feedback(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: Optional[int] = None
-    solution_id: str
-    rating: str
-    notes: Optional[str] = None
-    committed_ticket_id: Optional[str] = None
-    created_at: Optional[datetime] = None
-
-
 RequiredText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
@@ -142,4 +188,3 @@ class KnowledgeIngestDocument(BaseModel):
     system: Optional[str] = None
     file_path: Optional[str] = None
     text: RequiredText
-

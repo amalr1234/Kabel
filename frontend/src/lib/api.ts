@@ -129,6 +129,8 @@ export interface AnalyticsSolutionUsage {
   total_solutions: number;
   by_confidence: Record<string, number>;
   by_feedback: Record<string, number>;
+  gap_count?: number;
+  gap_frequency_rate?: number;
 }
 
 export interface AnalyticsFeedbackScores {

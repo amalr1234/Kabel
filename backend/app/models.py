@@ -87,7 +87,8 @@ class SolutionUsage(Base):
     evidence_json = Column(Text, nullable=True)
     solution_title = Column(String, nullable=True)
     blueprint_json = Column(Text, nullable=True)
+    gaps_json = Column(Text, nullable=True)
+    gap_count = Column(Integer, default=0)
     query_system = Column(String, nullable=True)
     query_category = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-
