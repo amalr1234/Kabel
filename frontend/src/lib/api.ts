@@ -3,6 +3,7 @@ export interface SolutionQuery {
   system?: string | null;
   category?: string | null;
   priority?: string | null;
+  support_level?: string | null;
 }
 
 export interface EvidenceItem {
@@ -15,6 +16,7 @@ export interface EvidenceItem {
   snippet: string;
   system?: string | null;
   category?: string | null;
+  support_level?: string | null;
   match_score: number;
   reason: string;
 }
@@ -37,6 +39,9 @@ export interface SolutionResponse {
   confidence_breakdown: ConfidenceBreakdown;
   knowledge_gaps: string[];
   requires_human_review: boolean;
+  support_level?: string | null;
+  support_level_reason?: string | null;
+  support_level_routing?: string | null;
 }
 
 export interface FeedbackRequest {
@@ -65,6 +70,8 @@ export interface KnowledgeTicket {
   title: string;
   system?: string | null;
   category?: string | null;
+  support_level?: string | null;
+  support_level_reason?: string | null;
   status?: string | null;
   feedback_score?: number | null;
 }
@@ -85,6 +92,8 @@ export interface TicketIngestPayload {
   system?: string;
   category?: string;
   priority?: string;
+  support_level?: string;
+  support_level_reason?: string;
   status?: string;
   resolution?: string;
   resolver?: string;
@@ -110,6 +119,8 @@ export interface IngestResult {
   sap_notes?: string;
   transactions?: string;
   error_codes?: string;
+  support_level?: string;
+  support_level_reason?: string;
 }
 
 export interface AuditEntry {

@@ -13,6 +13,7 @@ from app.chroma import get_or_create_collection
 from app.embeddings import GeminiEmbeddingFunction
 from app.models import Document, Ticket
 from app.sap_signals import extract_signals, merge_signal_fields, pack_token_chunks, split_heading_blocks
+from app.support_level import apply_support_level
 
 TICKET_COLLECTION = "solvia_tickets"
 DOCUMENT_COLLECTION = "solvia_documents"
@@ -105,6 +106,8 @@ def ticket_metadata(ticket: Ticket) -> dict:
         "category": ticket.category,
         "system": ticket.system,
         "priority": ticket.priority,
+        "support_level": ticket.support_level or "",
+        "support_level_reason": ticket.support_level_reason or "",
         "status": ticket.status,
         "resolver": ticket.resolver,
         "resolution_time_hours": ticket.resolution_time_hours,
@@ -188,6 +191,7 @@ def ingest_ticket(ticket: Ticket, db_session) -> dict:
         setattr(ticket, field, value or None)
     if ticket.feedback_score is None:
         ticket.feedback_score = 0.5
+    level, reason = apply_support_level(ticket)
 
     _replace_chunks(TICKET_COLLECTION, "ticket_id", "ticket", chunks, ticket_metadata(ticket))
     db_session.add(ticket)
@@ -201,6 +205,8 @@ def ingest_ticket(ticket: Ticket, db_session) -> dict:
         "sap_notes": ticket.sap_notes or "",
         "transactions": ticket.transactions or "",
         "error_codes": ticket.error_codes or "",
+        "support_level": level,
+        "support_level_reason": reason,
     }
 
 

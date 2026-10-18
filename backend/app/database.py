@@ -15,6 +15,8 @@ _SQLITE_COLUMNS = {
         "sap_notes": "TEXT",
         "transactions": "TEXT",
         "error_codes": "TEXT",
+        "support_level": "TEXT",
+        "support_level_reason": "TEXT",
     },
     "feedback": {
         "committed_ticket_id": "TEXT",
@@ -25,6 +27,8 @@ _SQLITE_COLUMNS = {
         "blueprint_json": "TEXT",
         "query_system": "TEXT",
         "query_category": "TEXT",
+        "query_support_level": "TEXT",
+        "suggested_support_level": "TEXT",
     },
 }
 

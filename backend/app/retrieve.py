@@ -9,6 +9,7 @@ def build_where(
     category: Optional[str] = None,
     priority: Optional[str] = None,
     status: Optional[str] = None,
+    support_level: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
     clauses: list[dict[str, Any]] = []
     if system:
@@ -17,6 +18,8 @@ def build_where(
         clauses.append({"category": {"$eq": category}})
     if priority:
         clauses.append({"priority": {"$eq": priority}})
+    if support_level:
+        clauses.append({"support_level": {"$eq": support_level}})
     if status:
         clauses.append({"status": {"$eq": status}})
     if not clauses:
@@ -30,6 +33,7 @@ def filter_fallbacks(
     system: Optional[str],
     category: Optional[str],
     priority: Optional[str],
+    support_level: Optional[str] = None,
     *,
     prefer_resolved: bool,
 ) -> list[Optional[dict[str, Any]]]:
@@ -44,11 +48,16 @@ def filter_fallbacks(
             variants.append(where)
 
     if prefer_resolved:
-        add(build_where(system, category, priority, "resolved"))
+        add(build_where(system, category, priority, "resolved", support_level))
+    add(build_where(system, category, priority, support_level=support_level))
+    add(build_where(system, category, support_level=support_level))
     add(build_where(system, category, priority))
     add(build_where(system, category))
+    add(build_where(system, support_level=support_level) if support_level else build_where(system))
     add(build_where(system))
+    add(build_where(category=category, support_level=support_level) if category or support_level else None)
     add(build_where(category=category) if category else None)
+    add(build_where(support_level=support_level) if support_level else None)
     add(None)
     return variants
 

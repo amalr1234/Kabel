@@ -10,7 +10,7 @@ import {
   type KnowledgeDocument,
   type KnowledgeTicket,
 } from "@/lib/api";
-import { SYSTEMS } from "@/lib/constants";
+import { SUPPORT_LEVELS, SUPPORT_LEVEL_LABELS, SYSTEMS } from "@/lib/constants";
 
 type PendingDelete = { kind: "ticket" | "document"; id: string; title: string };
 
@@ -34,6 +34,7 @@ const Page: NextPage = () => {
     resolution: "",
     system: "SAP",
     category: "basis",
+    support_level: "",
     sap_notes: "",
     transactions: "",
     error_codes: "",
@@ -87,8 +88,15 @@ const Page: NextPage = () => {
 
   const submitTicket = (event: React.FormEvent) => {
     event.preventDefault();
+    const { support_level, ...rest } = ticketForm;
     runAction(
-      () => api.ingestTicket({ ...ticketForm, status: "resolved", resolver: "consultant" }),
+      () =>
+        api.ingestTicket({
+          ...rest,
+          ...(support_level ? { support_level } : {}),
+          status: "resolved",
+          resolver: "consultant",
+        }),
       (result) =>
         `Ingested ${result.ticket_id} (${result.chunk_count ?? 0} chunks). Resolution stays attached to every chunk.`
     );
@@ -222,6 +230,13 @@ const Page: NextPage = () => {
               onChange={(value) => setTicketForm({ ...ticketForm, category: value })}
             />
           </div>
+          <Select
+            label="Support level (optional)"
+            value={ticketForm.support_level}
+            onChange={(value) => setTicketForm({ ...ticketForm, support_level: value })}
+            options={["", ...SUPPORT_LEVELS]}
+            optionLabels={{ "": "Auto-classify", ...SUPPORT_LEVEL_LABELS }}
+          />
           <Field
             label="SAP Notes"
             value={ticketForm.sap_notes}
@@ -341,9 +356,9 @@ const Page: NextPage = () => {
           items={tickets.map((ticket) => ({
             id: ticket.ticket_id,
             title: ticket.title,
-            meta: `${ticket.system || "n/a"} · ${ticket.category || "n/a"} · score ${(
-              ticket.feedback_score ?? 0.5
-            ).toFixed(2)}`,
+            meta: `${ticket.system || "n/a"} · ${ticket.category || "n/a"} · ${
+              ticket.support_level || "level?"
+            } · score ${(ticket.feedback_score ?? 0.5).toFixed(2)}`,
             onReingest: () => reingest(ticket.ticket_id, api.reingestTicket),
             onDelete: () =>
               setPendingDelete({ kind: "ticket", id: ticket.ticket_id, title: ticket.title }),
@@ -459,11 +474,13 @@ function Select({
   value,
   onChange,
   options,
+  optionLabels,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   options: string[];
+  optionLabels?: Record<string, string>;
 }) {
   return (
     <label className="mb-3 block text-sm text-slate-300">
@@ -474,8 +491,8 @@ function Select({
         className="mt-1 w-full rounded-xl border border-white/10 bg-[#030817] px-3 py-2 text-sm text-white outline-none focus:border-indigo-400"
       >
         {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
+          <option key={option || "auto"} value={option}>
+            {optionLabels?.[option] ?? option}
           </option>
         ))}
       </select>

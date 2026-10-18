@@ -24,6 +24,8 @@ class Ticket(Base):
     category = Column(String, index=True)
     system = Column(String, index=True)
     priority = Column(String, index=True)
+    support_level = Column(String, index=True)  # L1 | L2 | L3
+    support_level_reason = Column(Text, nullable=True)
     status = Column(String, default="open")
     resolution = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -91,4 +93,6 @@ class SolutionUsage(Base):
     gap_count = Column(Integer, default=0)
     query_system = Column(String, nullable=True)
     query_category = Column(String, nullable=True)
+    query_support_level = Column(String, nullable=True)
+    suggested_support_level = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

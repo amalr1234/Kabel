@@ -13,7 +13,14 @@ import {
   type SolutionQuery,
   type SolutionResponse,
 } from "@/lib/api";
-import { CATEGORIES, PRIORITIES, STORAGE_KEYS, SYSTEMS } from "@/lib/constants";
+import {
+  CATEGORIES,
+  PRIORITIES,
+  STORAGE_KEYS,
+  SUPPORT_LEVELS,
+  SUPPORT_LEVEL_LABELS,
+  SYSTEMS,
+} from "@/lib/constants";
 import { useEngineStatus, type EngineState } from "@/lib/useEngineStatus";
 
 const BACKEND_LABELS: Record<EngineState, string> = {
@@ -41,6 +48,7 @@ type SearchDraft = {
   system: string;
   category: string;
   priority: string;
+  support_level: string;
 };
 
 const Page: NextPage = () => {
@@ -48,6 +56,7 @@ const Page: NextPage = () => {
   const [system, setSystem] = useState("");
   const [category, setCategory] = useState("");
   const [priority, setPriority] = useState("");
+  const [supportLevel, setSupportLevel] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [solution, setSolution] = useState<SolutionResponse | null>(null);
@@ -60,6 +69,7 @@ const Page: NextPage = () => {
     setSystem("");
     setCategory("");
     setPriority("");
+    setSupportLevel("");
   };
 
   useEffect(() => {
@@ -73,6 +83,7 @@ const Page: NextPage = () => {
         setSystem(draft.system ?? "");
         setCategory(draft.category ?? "");
         setPriority(draft.priority ?? "");
+        setSupportLevel(draft.support_level ?? "");
       }
 
       if (savedSolution) {
@@ -87,12 +98,20 @@ const Page: NextPage = () => {
 
   useEffect(() => {
     if (!isHydrated) return;
-    const hasDraft = Boolean(query.trim() || system || category || priority);
+    const hasDraft = Boolean(query.trim() || system || category || priority || supportLevel);
     persist(
       STORAGE_KEYS.searchDraft,
-      hasDraft ? JSON.stringify({ query, system, category, priority } satisfies SearchDraft) : null
+      hasDraft
+        ? JSON.stringify({
+            query,
+            system,
+            category,
+            priority,
+            support_level: supportLevel,
+          } satisfies SearchDraft)
+        : null
     );
-  }, [query, system, category, priority, isHydrated]);
+  }, [query, system, category, priority, supportLevel, isHydrated]);
 
   useEffect(() => {
     if (isHydrated) persist(STORAGE_KEYS.lastSolution, solution ? JSON.stringify(solution) : null);
@@ -112,6 +131,7 @@ const Page: NextPage = () => {
       system: system || null,
       category: category || null,
       priority: priority || null,
+      support_level: supportLevel || null,
     };
 
     try {
@@ -190,7 +210,7 @@ const Page: NextPage = () => {
           />
         </div>
 
-        <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <FilterSelect
             id="system"
             label="System"
@@ -216,6 +236,16 @@ const Page: NextPage = () => {
             onChange={setPriority}
             placeholder="Any priority"
             options={PRIORITIES}
+          />
+
+          <FilterSelect
+            id="support_level"
+            label="Support level"
+            value={supportLevel}
+            onChange={setSupportLevel}
+            placeholder="Any level"
+            options={[...SUPPORT_LEVELS]}
+            optionLabels={SUPPORT_LEVEL_LABELS}
           />
         </div>
 
@@ -275,6 +305,7 @@ function FilterSelect({
   onChange,
   placeholder,
   options,
+  optionLabels,
 }: {
   id: string;
   label: string;
@@ -282,6 +313,7 @@ function FilterSelect({
   onChange: (value: string) => void;
   placeholder: string;
   options: string[];
+  optionLabels?: Record<string, string>;
 }) {
   return (
     <div>
@@ -301,7 +333,7 @@ function FilterSelect({
         <option value="">{placeholder}</option>
         {options.map((option) => (
           <option key={option} value={option}>
-            {option}
+            {optionLabels?.[option] ?? option}
           </option>
         ))}
       </select>

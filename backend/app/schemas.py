@@ -10,6 +10,7 @@ class SolutionQuery(BaseModel):
     system: Optional[str] = None
     category: Optional[str] = None
     priority: Optional[str] = None
+    support_level: Optional[str] = None
 
 
 class EvidenceItem(BaseModel):
@@ -22,6 +23,7 @@ class EvidenceItem(BaseModel):
     snippet: str
     system: Optional[str] = None
     category: Optional[str] = None
+    support_level: Optional[str] = None
     match_score: float
     reason: str
 
@@ -44,6 +46,9 @@ class SolutionResponse(BaseModel):
     confidence_breakdown: ConfidenceBreakdown
     knowledge_gaps: List[str]
     requires_human_review: bool
+    support_level: Optional[str] = None
+    support_level_reason: Optional[str] = None
+    support_level_routing: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +63,7 @@ class GeminiEvidenceCitation(BaseModel):
     snippet: str = ""
     system: Optional[str] = None
     category: Optional[str] = None
+    support_level: Optional[str] = None
     match_score: float = 0.0
     reason: str = ""
 
@@ -71,6 +77,8 @@ class GeminiSolutionOutput(BaseModel):
     evidence: List[GeminiEvidenceCitation]
     knowledge_gaps: List[str]
     requires_human_review: bool = True
+    support_level: Optional[Literal["L1", "L2", "L3"]] = None
+    support_level_reason: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +140,8 @@ class Ticket(BaseModel):
     category: Optional[str] = None
     system: Optional[str] = None
     priority: Optional[str] = None
+    support_level: Optional[str] = None
+    support_level_reason: Optional[str] = None
     status: Optional[str] = None
     resolution: Optional[str] = None
     created_at: Optional[datetime] = None
@@ -172,12 +182,15 @@ class KnowledgeIngestTicket(BaseModel):
     category: Optional[str] = None
     system: Optional[str] = None
     priority: Optional[str] = None
+    support_level: Optional[str] = None
+    support_level_reason: Optional[str] = None
     status: Optional[str] = "resolved"
     resolution: Optional[str] = None
     resolver: Optional[str] = None
     sap_notes: Optional[str] = None
     transactions: Optional[str] = None
     error_codes: Optional[str] = None
+    resolution_time_hours: Optional[float] = None
 
 
 class KnowledgeIngestDocument(BaseModel):

@@ -88,6 +88,7 @@ def commit_verified_solution(
         feedback_score=0.85,
         source="SOLVIA verify_commit",
         source_reliability=0.95,
+        support_level=usage.suggested_support_level or usage.query_support_level,
     )
     db.add(ticket)
     db.commit()

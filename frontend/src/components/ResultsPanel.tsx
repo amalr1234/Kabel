@@ -1,5 +1,6 @@
 import React from "react";
 import type { SolutionResponse } from "@/lib/api";
+import { SUPPORT_LEVEL_LABELS } from "@/lib/constants";
 
 interface ResultsPanelProps {
   solution: SolutionResponse;
@@ -14,6 +15,14 @@ export default function ResultsPanel({ solution }: ResultsPanelProps) {
           <ReasoningSection reasoning={solution.reasoning} />
 
           <SolutionHeader solution={solution} />
+
+          {solution.support_level && (
+            <SupportLevelBanner
+              level={solution.support_level}
+              reason={solution.support_level_reason}
+              routing={solution.support_level_routing}
+            />
+          )}
 
           <ExecutionBlueprint
             blueprint={solution.execution_blueprint}
@@ -70,6 +79,14 @@ function SolutionHeader({ solution }: { solution: SolutionResponse }) {
               {solution.confidence}
             </span>
 
+            {solution.support_level && (
+              <span className="inline-flex items-center gap-2 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1.5 text-xs font-semibold text-cyan-100">
+                {SUPPORT_LEVEL_LABELS[
+                  solution.support_level as keyof typeof SUPPORT_LEVEL_LABELS
+                ] ?? solution.support_level}
+              </span>
+            )}
+
             {solution.requires_human_review && (
               <span className="inline-flex items-center gap-2 rounded-full border border-amber-400/25 bg-amber-400/10 px-3 py-1.5 text-xs text-amber-200">
                 Human review required
@@ -80,6 +97,29 @@ function SolutionHeader({ solution }: { solution: SolutionResponse }) {
 
         <ScoreRing score={score} />
       </div>
+    </section>
+  );
+}
+
+function SupportLevelBanner({
+  level,
+  reason,
+  routing,
+}: {
+  level: string;
+  reason?: string | null;
+  routing?: string | null;
+}) {
+  return (
+    <section className="rounded-2xl border border-cyan-400/25 bg-cyan-400/[0.06] px-5 py-4">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-300/80">
+        Support routing
+      </div>
+      <p className="mt-2 text-sm font-semibold text-white">
+        {SUPPORT_LEVEL_LABELS[level as keyof typeof SUPPORT_LEVEL_LABELS] ?? level}
+      </p>
+      {reason && <p className="mt-1.5 text-xs leading-5 text-slate-400">{reason}</p>}
+      {routing && <p className="mt-2 text-xs leading-5 text-cyan-100/90">{routing}</p>}
     </section>
   );
 }
@@ -345,6 +385,7 @@ function EvidenceCard({
                 {item.document_id && item.document_id !== "N/A"
                   ? ` · ${item.document_id}`
                   : ""}
+                {item.support_level ? ` · ${item.support_level}` : ""}
               </div>
             </div>
 

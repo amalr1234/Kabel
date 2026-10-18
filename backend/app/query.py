@@ -24,6 +24,11 @@ from app.schemas import (
     SolutionQuery,
     SolutionResponse,
 )
+from app.support_level import (
+    classify_support_level,
+    normalize_level,
+    routing_hint,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +99,7 @@ def score_candidate(
     query_category: Optional[str],
     query_signals=None,
     metric: Optional[str] = None,
+    query_support_level: Optional[str] = None,
 ) -> float:
     distance = float(result.get("distance", 0.0))
     base = clamp(distance_to_similarity(distance, metric or chromadb_metric()) * 100.0)
@@ -103,6 +109,13 @@ def score_candidate(
         bonus += 8.0
     if query_category and (result.get("category") or "").lower() == query_category.lower():
         bonus += 6.0
+    wanted = normalize_level(query_support_level)
+    candidate_level = normalize_level(result.get("support_level"))
+    if wanted and candidate_level:
+        if wanted == candidate_level:
+            bonus += 10.0
+        else:
+            bonus -= 4.0
     if query_signals is not None:
         bonus += signal_overlap_bonus(query_signals, result)
     if (result.get("status") or "").lower() == "resolved":
@@ -172,6 +185,8 @@ _TEXT_META_KEYS = (
     "system",
     "category",
     "priority",
+    "support_level",
+    "support_level_reason",
     "status",
     "resolver",
     "created_at",
@@ -188,6 +203,7 @@ def _normalize_candidate(
     query_category: Optional[str],
     query_signals,
     metric: str,
+    query_support_level: Optional[str] = None,
 ) -> dict:
     meta = parsed.get("metadata") or {}
     is_ticket = parsed.get("collection") == TICKET_COLLECTION
@@ -207,7 +223,12 @@ def _normalize_candidate(
         **{key: meta.get(key) or "" for key in _TEXT_META_KEYS},
     }
     candidate["match_score"] = score_candidate(
-        candidate, query_system, query_category, query_signals, metric
+        candidate,
+        query_system,
+        query_category,
+        query_signals,
+        metric,
+        query_support_level,
     )
     return candidate
 
@@ -262,16 +283,19 @@ def retrieve_candidates(
     query_category: Optional[str],
     query_priority: Optional[str] = None,
     query_text: Optional[str] = None,
+    query_support_level: Optional[str] = None,
 ) -> list[dict]:
     client = get_chroma_client()
     raw_query = query_text or ""
     query_signals = extract_signals(raw_query)
     metric = chromadb_metric()
+    wanted_level = normalize_level(query_support_level)
     candidates: list[dict] = []
     where_variants = filter_fallbacks(
         query_system,
         query_category,
         query_priority,
+        wanted_level,
         prefer_resolved=True,
     )
 
@@ -299,7 +323,14 @@ def retrieve_candidates(
                 break
 
         candidates.extend(
-            _normalize_candidate(parsed, query_system, query_category, query_signals, metric)
+            _normalize_candidate(
+                parsed,
+                query_system,
+                query_category,
+                query_signals,
+                metric,
+                wanted_level,
+            )
             for parsed in collected
         )
 
@@ -334,6 +365,8 @@ def build_evidence_context(candidates: list[dict]) -> str:
             lines.append(f"System: {c['system']}")
         if c["category"]:
             lines.append(f"Category: {c['category']}")
+        if c.get("support_level"):
+            lines.append(f"Support level: {c['support_level']}")
         if c.get("sap_notes"):
             lines.append(f"SAP Notes: {c['sap_notes']}")
         if c.get("transactions"):
@@ -391,6 +424,7 @@ def _demo_solution_from_candidates(candidates: list[dict]) -> dict:
                 "snippet": snippet,
                 "system": candidate.get("system") or "",
                 "category": candidate.get("category") or "",
+                "support_level": candidate.get("support_level") or "",
                 "match_score": float(candidate.get("match_score") or 0),
                 "reason": "Retrieved from the knowledge library with hybrid re-ranking.",
             }
@@ -448,16 +482,62 @@ def compute_confidence_breakdown(candidates: list[dict], top_score: float) -> Co
     )
 
 
+def _suggest_support_level(
+    query: SolutionQuery,
+    candidates: list[dict],
+    gemini_result: Optional[dict] = None,
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Prefer consultant filter, then Gemini, then rules, then top evidence."""
+    filtered = normalize_level(query.support_level)
+    if filtered:
+        reason = f"Consultant filtered search to {filtered}."
+        return filtered, reason, routing_hint(filtered)
+
+    gemini_level = normalize_level((gemini_result or {}).get("support_level"))
+    gemini_reason = (gemini_result or {}).get("support_level_reason")
+    if gemini_level:
+        reason = gemini_reason or f"Model suggested {gemini_level} from retrieved evidence."
+        return gemini_level, reason, routing_hint(gemini_level)
+
+    rule_level, rule_reason = classify_support_level(
+        title="",
+        description=query.query,
+        category=query.category,
+        system=query.system,
+    )
+    top_levels = [
+        normalize_level(c.get("support_level"))
+        for c in candidates[:5]
+        if normalize_level(c.get("support_level"))
+    ]
+    if top_levels:
+        # Majority vote among top evidence; ties keep rule-based level.
+        counts: dict[str, int] = {}
+        for level in top_levels:
+            counts[level] = counts.get(level, 0) + 1
+        majority = max(counts, key=lambda key: (counts[key], {"L3": 3, "L2": 2, "L1": 1}[key]))
+        if counts[majority] >= 2 or majority == rule_level:
+            reason = candidates[0].get("support_level_reason") or (
+                f"Top evidence majority is {majority} ({counts[majority]}/{len(top_levels)})."
+            )
+            return majority, reason, routing_hint(majority)
+
+    return rule_level, rule_reason, routing_hint(rule_level)
+
+
 def solve(query: SolutionQuery, db: Optional[Session] = None) -> SolutionResponse:
+    wanted_level = normalize_level(query.support_level)
     candidates = retrieve_candidates(
         embed_query(query.query),
         query.system,
         query.category,
         query.priority,
         query.query,
+        wanted_level,
     )
 
     if not candidates:
+        level, reason, route = _suggest_support_level(query, [], None)
         return SolutionResponse(
             solution_id=str(uuid.uuid4()),
             solution_title="No matching evidence found",
@@ -469,10 +549,21 @@ def solve(query: SolutionQuery, db: Optional[Session] = None) -> SolutionRespons
             confidence_breakdown=ConfidenceBreakdown(semantic_similarity=0, historical_success_rate=0, source_reliability=0, recency_factor=0),
             knowledge_gaps=["No historical records found for this symptom description."],
             requires_human_review=True,
+            support_level=level,
+            support_level_reason=reason,
+            support_level_routing=route,
         )
 
     context = build_evidence_context(candidates)
-    user_prompt = f"User issue:\n{query.query}\n\nRetrieved evidence:\n{context}"
+    user_prompt = (
+        f"User issue:\n{query.query}\n\n"
+        f"Consultant filters: system={query.system or 'any'}, "
+        f"category={query.category or 'any'}, priority={query.priority or 'any'}, "
+        f"support_level={wanted_level or 'any'}\n\n"
+        f"Also classify the issue as L1, L2, or L3 support ownership in support_level "
+        f"and explain briefly in support_level_reason.\n\n"
+        f"Retrieved evidence:\n{context}"
+    )
     gemini_result = call_gemini_reasoning(user_prompt, candidates)
 
     evidence = _build_evidence(gemini_result.get("evidence") or [], candidates)
@@ -483,6 +574,9 @@ def solve(query: SolutionQuery, db: Optional[Session] = None) -> SolutionRespons
     confidence = gemini_result.get("confidence") or "medium"
     execution_blueprint = gemini_result.get("execution_blueprint") or []
     knowledge_gaps = gemini_result.get("knowledge_gaps") or []
+    support_level, support_reason, support_route = _suggest_support_level(
+        query, candidates, gemini_result
+    )
 
     if db is not None:
         try:
@@ -499,6 +593,8 @@ def solve(query: SolutionQuery, db: Optional[Session] = None) -> SolutionRespons
                     gap_count=len(knowledge_gaps),
                     query_system=query.system,
                     query_category=query.category,
+                    query_support_level=wanted_level,
+                    suggested_support_level=support_level,
                 )
             )
             db.commit()
@@ -510,7 +606,10 @@ def solve(query: SolutionQuery, db: Optional[Session] = None) -> SolutionRespons
         log_audit(
             event_type="solution_generated",
             actor="SOLVIA",
-            detail=f"query={query.query[:100]} solution_id={solution_id} score={match_score} gaps={len(knowledge_gaps)}",
+            detail=(
+                f"query={query.query[:100]} solution_id={solution_id} "
+                f"score={match_score} gaps={len(knowledge_gaps)} level={support_level}"
+            ),
         )
     except Exception:
         pass
@@ -526,6 +625,9 @@ def solve(query: SolutionQuery, db: Optional[Session] = None) -> SolutionRespons
         confidence_breakdown=breakdown,
         knowledge_gaps=knowledge_gaps,
         requires_human_review=True,
+        support_level=support_level,
+        support_level_reason=support_reason,
+        support_level_routing=support_route,
     )
 
 
@@ -550,6 +652,7 @@ def _build_evidence(gemini_evidence: list, candidates: list[dict]) -> list[Evide
                 snippet=(merged.get("snippet") or "")[:400],
                 system=merged.get("system"),
                 category=merged.get("category"),
+                support_level=merged.get("support_level") or None,
                 match_score=clamp(float(matched.get("match_score") or merged.get("match_score") or 0)),
                 reason=cited.get("reason", "Cited in grounded synthesis"),
             )
@@ -568,6 +671,7 @@ def _build_evidence(gemini_evidence: list, candidates: list[dict]) -> list[Evide
             snippet=(c.get("snippet") or "")[:400],
             system=c.get("system"),
             category=c.get("category"),
+            support_level=c.get("support_level") or None,
             match_score=clamp(float(c.get("match_score") or 0)),
             reason="Retrieved candidate supporting recommendation",
         )
