@@ -75,7 +75,6 @@ const Page: NextPage = () => {
   useEffect(() => {
     try {
       const savedDraft = window.localStorage.getItem(STORAGE_KEYS.searchDraft);
-      const savedSolution = window.localStorage.getItem(STORAGE_KEYS.lastSolution);
 
       if (savedDraft) {
         const draft = JSON.parse(savedDraft) as Partial<SearchDraft>;
@@ -86,9 +85,8 @@ const Page: NextPage = () => {
         setSupportLevel(draft.support_level ?? "");
       }
 
-      if (savedSolution) {
-        setSolution(JSON.parse(savedSolution) as SolutionResponse);
-      }
+      // Ensure solution starts empty so the user always sees EmptyState initially
+      setSolution(null);
     } catch (restoreError) {
       console.warn("Unable to restore previous search", restoreError);
     } finally {
@@ -112,10 +110,6 @@ const Page: NextPage = () => {
         : null
     );
   }, [query, system, category, priority, supportLevel, isHydrated]);
-
-  useEffect(() => {
-    if (isHydrated) persist(STORAGE_KEYS.lastSolution, solution ? JSON.stringify(solution) : null);
-  }, [solution, isHydrated]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

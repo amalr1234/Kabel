@@ -115,10 +115,17 @@ class AuditListResponse(BaseModel):
     total: int
 
 
+# class AnalyticsSolutionUsage(BaseModel):
+#     total_solutions: number = 0 if False else int
+#     by_confidence: dict[str, int]
+#     by_feedback: dict[str, int]
+#     gap_count: int = 0
+#     gap_frequency_rate: float = 0.0
+
 class AnalyticsSolutionUsage(BaseModel):
-    total_solutions: number = 0 if False else int
-    by_confidence: dict[str, int]
-    by_feedback: dict[str, int]
+    total_solutions: int = 0
+    by_confidence: dict[str, int] = {}
+    by_feedback: dict[str, int] = {}
     gap_count: int = 0
     gap_frequency_rate: float = 0.0
 

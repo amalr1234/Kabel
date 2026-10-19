@@ -9,6 +9,26 @@ from app.schemas import AnalyticsFeedbackScores, AnalyticsSolutionUsage
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 
+# @router.get("/solution-usage", response_model=AnalyticsSolutionUsage)
+# def get_solution_usage(db: Session = Depends(get_db)):
+#     records = db.query(SolutionUsage).all()
+#     total = len(records)
+
+#     by_confidence = Counter(r.confidence.lower() for r in records if r.confidence)
+#     by_feedback = Counter(r.feedback_rating.lower() for r in records if r.feedback_rating)
+
+#     # Compute knowledge gap occurrences
+#     gap_records = sum(1 for r in records if (r.gap_count or 0) > 0)
+#     gap_frequency_rate = round((gap_records / total * 100), 1) if total > 0 else 0.0
+
+#     return AnalyticsSolutionUsage(
+#         total_solutions=total,
+#         by_confidence=dict(by_confidence),
+#         by_feedback=dict(by_feedback),
+#         gap_count=gap_records,
+#         gap_frequency_rate=gap_frequency_rate,
+#     )
+
 @router.get("/solution-usage", response_model=AnalyticsSolutionUsage)
 def get_solution_usage(db: Session = Depends(get_db)):
     records = db.query(SolutionUsage).all()
@@ -17,8 +37,8 @@ def get_solution_usage(db: Session = Depends(get_db)):
     by_confidence = Counter(r.confidence.lower() for r in records if r.confidence)
     by_feedback = Counter(r.feedback_rating.lower() for r in records if r.feedback_rating)
 
-    # Compute knowledge gap occurrences
-    gap_records = sum(1 for r in records if (r.gap_count or 0) > 0)
+    # Safely handle missing or None gap_count values
+    gap_records = sum(1 for r in records if getattr(r, "gap_count", 0) and r.gap_count > 0)
     gap_frequency_rate = round((gap_records / total * 100), 1) if total > 0 else 0.0
 
     return AnalyticsSolutionUsage(
