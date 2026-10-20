@@ -24,15 +24,20 @@ class Ticket(Base):
     category = Column(String, index=True)
     system = Column(String, index=True)
     priority = Column(String, index=True)
+    support_level = Column(String, index=True)  # L1 | L2 | L3
+    support_level_reason = Column(Text, nullable=True)
     status = Column(String, default="open")
     resolution = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     resolved_at = Column(DateTime(timezone=True), nullable=True)
     resolver = Column(String, nullable=True)
     resolution_time_hours = Column(Float, nullable=True)
-    feedback_score = Column(Float, nullable=True)
+    feedback_score = Column(Float, nullable=True, default=0.5)
     source = Column(String, default="ServiceNow", nullable=True)
     source_reliability = Column(Float, default=0.90, nullable=True)
+    sap_notes = Column(String, nullable=True)
+    transactions = Column(String, nullable=True)
+    error_codes = Column(String, nullable=True)
 
 
 class Document(Base):
@@ -58,6 +63,7 @@ class Feedback(Base):
     solution_id = Column(String, nullable=False, index=True)
     rating = Column(String, nullable=False)
     notes = Column(Text, nullable=True)
+    committed_ticket_id = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -80,5 +86,13 @@ class SolutionUsage(Base):
     match_score = Column(Integer, nullable=False)
     confidence = Column(String, nullable=False)
     feedback_rating = Column(String, nullable=True)
+    evidence_json = Column(Text, nullable=True)
+    solution_title = Column(String, nullable=True)
+    blueprint_json = Column(Text, nullable=True)
+    gaps_json = Column(Text, nullable=True)
+    gap_count = Column(Integer, default=0)
+    query_system = Column(String, nullable=True)
+    query_category = Column(String, nullable=True)
+    query_support_level = Column(String, nullable=True)
+    suggested_support_level = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-

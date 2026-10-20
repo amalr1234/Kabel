@@ -55,7 +55,27 @@ textarea {
   font: inherit;
 }
 
-button:disabled {
+button:not(:disabled),
+a[href],
+select,
+input[type="checkbox"],
+input[type="radio"],
+summary,
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
+input[type="file"]::file-selector-button {
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+
+input[type="file"]::file-selector-button:hover {
+  background-color: rgba(99, 102, 241, 0.35);
+}
+
+button:disabled,
+[aria-disabled="true"] {
   cursor: not-allowed;
 }
 

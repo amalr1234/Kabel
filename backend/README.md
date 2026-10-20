@@ -5,18 +5,17 @@
 ```bash
 cd backend
 
-# Use SQLite for local development when PostgreSQL is not available
-export SOLVIA_DB_SQLITE=1
+# First time only: create .venv and install dependencies
+npm run setup
 
-# Optional: run in demo mode without a Gemini API key
-export DEMO_MODE=true
+# Run the server with auto-reload on code changes
+npm run dev
 
-# Install dependencies (already done if you followed setup)
-./.venv/Scripts/pip.exe install -r requirements.txt
-
-# Run the server
-./.venv/Scripts/uvicorn.exe app.main:app --reload --host 0.0.0.0 --port 8000
+# Or run without auto-reload
+npm run start
 ```
+
+Optional: set `DEMO_MODE=true` in `backend/.env` to run without a Gemini API key.
 
 - API docs: `http://localhost:8000/docs`
 - Health: `http://localhost:8000/health`

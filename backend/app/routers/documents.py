@@ -3,7 +3,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 from typing import List, Optional
 
+from app.crud import find_document, get_document_or_404
 from app.database import get_db
+from app.ingest import ingest_document
 from app.models import Document as DocumentModel
 from app.schemas import Document as DocumentSchema
 
@@ -27,24 +29,17 @@ def list_documents(
 
 @router.get("/{document_id}", response_model=DocumentSchema)
 def get_document(document_id: str, db: Session = Depends(get_db)):
-    doc = db.execute(
-        select(DocumentModel).where(DocumentModel.document_id == document_id)
-    ).scalars().first()
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-    return doc
+    return get_document_or_404(db, document_id)
 
 
 @router.post("", response_model=DocumentSchema, status_code=201)
 def create_document(doc: DocumentSchema, db: Session = Depends(get_db)):
-    existing = db.execute(
-        select(DocumentModel).where(DocumentModel.document_id == doc.document_id)
-    ).scalars().first()
-    if existing:
+    if find_document(db, doc.document_id):
         raise HTTPException(status_code=409, detail="Document ID already exists")
 
-    db_doc = DocumentModel(**doc.model_dump(mode="json"))
+    db_doc = DocumentModel(**doc.model_dump(exclude={"id"}))
     db.add(db_doc)
     db.commit()
     db.refresh(db_doc)
+    ingest_document(db_doc, db)
     return db_doc

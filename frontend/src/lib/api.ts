@@ -3,6 +3,7 @@ export interface SolutionQuery {
   system?: string | null;
   category?: string | null;
   priority?: string | null;
+  support_level?: string | null;
 }
 
 export interface EvidenceItem {
@@ -15,6 +16,7 @@ export interface EvidenceItem {
   snippet: string;
   system?: string | null;
   category?: string | null;
+  support_level?: string | null;
   match_score: number;
   reason: string;
 }
@@ -27,6 +29,7 @@ export interface ConfidenceBreakdown {
 }
 
 export interface SolutionResponse {
+  solution_id: string;
   solution_title: string;
   match_score: number;
   confidence: string;
@@ -36,6 +39,9 @@ export interface SolutionResponse {
   confidence_breakdown: ConfidenceBreakdown;
   knowledge_gaps: string[];
   requires_human_review: boolean;
+  support_level?: string | null;
+  support_level_reason?: string | null;
+  support_level_routing?: string | null;
 }
 
 export interface FeedbackRequest {
@@ -49,7 +55,72 @@ export interface Feedback {
   solution_id: string;
   rating: string;
   notes?: string | null;
+  committed_ticket_id?: string | null;
   created_at?: string | null;
+}
+
+export interface KnowledgeStats {
+  tickets: number;
+  documents: number;
+  document_chunks: number;
+}
+
+export interface KnowledgeTicket {
+  ticket_id: string;
+  title: string;
+  system?: string | null;
+  category?: string | null;
+  support_level?: string | null;
+  support_level_reason?: string | null;
+  status?: string | null;
+  feedback_score?: number | null;
+}
+
+export interface KnowledgeDocument {
+  document_id: string;
+  title: string;
+  source_type: string;
+  system?: string | null;
+  category?: string | null;
+  chunk_count?: number | null;
+}
+
+export interface TicketIngestPayload {
+  ticket_id: string;
+  title: string;
+  description: string;
+  system?: string;
+  category?: string;
+  priority?: string;
+  support_level?: string;
+  support_level_reason?: string;
+  status?: string;
+  resolution?: string;
+  resolver?: string;
+  sap_notes?: string;
+  transactions?: string;
+  error_codes?: string;
+}
+
+export interface DocumentIngestPayload {
+  document_id: string;
+  title: string;
+  source_type: string;
+  system?: string;
+  category?: string;
+  text?: string;
+}
+
+export interface IngestResult {
+  status: string;
+  ticket_id?: string;
+  document_id?: string;
+  chunk_count?: number;
+  sap_notes?: string;
+  transactions?: string;
+  error_codes?: string;
+  support_level?: string;
+  support_level_reason?: string;
 }
 
 export interface AuditEntry {
@@ -69,6 +140,8 @@ export interface AnalyticsSolutionUsage {
   total_solutions: number;
   by_confidence: Record<string, number>;
   by_feedback: Record<string, number>;
+  gap_count?: number;
+  gap_frequency_rate?: number;
 }
 
 export interface AnalyticsFeedbackScores {
@@ -78,9 +151,31 @@ export interface AnalyticsFeedbackScores {
   verify_commit: number;
 }
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+export interface HealthCheck {
+  ok: boolean;
+  error?: string;
+  chunks?: number;
+}
 
-async function json<T>(response: Response): Promise<T> {
+export interface HealthResponse {
+  status: "live" | "demo" | "degraded";
+  service: string;
+  demo_mode: boolean;
+  gemini_available: boolean;
+  checks: {
+    database: HealthCheck;
+    vector_store: HealthCheck;
+  };
+}
+
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+export function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, init);
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     throw new Error(`API error ${response.status}: ${text}`);
@@ -88,55 +183,62 @@ async function json<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+function postJson<T>(path: string, body: unknown): Promise<T> {
+  return request<T>(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+const knowledgeItem = (kind: "tickets" | "documents", id: string) =>
+  `/knowledge/${kind}/${encodeURIComponent(id)}`;
+
 export const api = {
-  async solve(query: SolutionQuery): Promise<SolutionResponse> {
-    const res = await fetch(`${API_BASE_URL}/search/solve`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(query),
-    });
-    return json<SolutionResponse>(res);
-  },
+  getHealth: (signal?: AbortSignal) => request<HealthResponse>("/health", { signal }),
 
-  async postFeedback(req: FeedbackRequest): Promise<Feedback> {
-    const res = await fetch(`${API_BASE_URL}/feedback`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(req),
-    });
-    return json<Feedback>(res);
-  },
+  solve: (query: SolutionQuery) => postJson<SolutionResponse>("/search/solve", query),
 
-  async getFeedbackForSolution(solutionId: string): Promise<Feedback[]> {
-    const res = await fetch(`${API_BASE_URL}/feedback/solution/${encodeURIComponent(solutionId)}`);
-    return json<Feedback[]>(res);
-  },
+  postFeedback: (req: FeedbackRequest) => postJson<Feedback>("/feedback", req),
 
-  async getAudit(limit = 50, offset = 0, eventType?: string | null): Promise<AuditListResponse> {
-    const params = new URLSearchParams();
-    params.set("limit", String(limit));
-    params.set("offset", String(offset));
+  getAudit(limit = 50, offset = 0, eventType?: string | null) {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     if (eventType) params.set("event_type", eventType);
-    const res = await fetch(`${API_BASE_URL}/audit?${params}`);
-    return json<AuditListResponse>(res);
+    return request<AuditListResponse>(`/audit?${params}`);
   },
 
-  async getSolutionUsage(): Promise<AnalyticsSolutionUsage> {
-    const res = await fetch(`${API_BASE_URL}/analytics/solution-usage`);
-    return json<AnalyticsSolutionUsage>(res);
-  },
+  getSolutionUsage: () => request<AnalyticsSolutionUsage>("/analytics/solution-usage"),
 
-  async getFeedbackScores(): Promise<AnalyticsFeedbackScores> {
-    const res = await fetch(`${API_BASE_URL}/analytics/feedback-scores`);
-    return json<AnalyticsFeedbackScores>(res);
-  },
+  getFeedbackScores: () => request<AnalyticsFeedbackScores>("/analytics/feedback-scores"),
 
-  async getAuditAnalytics(limit = 50, offset = 0, eventType?: string | null): Promise<AuditListResponse> {
-    const params = new URLSearchParams();
-    params.set("limit", String(limit));
-    params.set("offset", String(offset));
-    if (eventType) params.set("event_type", eventType);
-    const res = await fetch(`${API_BASE_URL}/analytics/audit?${params}`);
-    return json<AuditListResponse>(res);
-  },
+  getKnowledgeStats: () => request<KnowledgeStats>("/knowledge/stats"),
+
+  listKnowledgeTickets: () => request<KnowledgeTicket[]>("/knowledge/tickets"),
+
+  listKnowledgeDocuments: () => request<KnowledgeDocument[]>("/knowledge/documents"),
+
+  ingestTicket: (payload: TicketIngestPayload) =>
+    postJson<IngestResult>("/knowledge/tickets", payload),
+
+  ingestDocument: (payload: DocumentIngestPayload) =>
+    postJson<IngestResult>("/knowledge/documents", payload),
+
+  uploadDocument: (form: FormData) =>
+    request<IngestResult>("/knowledge/documents/upload", { method: "POST", body: form }),
+
+  reingestTicket: (ticketId: string) =>
+    request<IngestResult>(`${knowledgeItem("tickets", ticketId)}/reingest`, { method: "POST" }),
+
+  reingestDocument: (documentId: string) =>
+    request<IngestResult>(`${knowledgeItem("documents", documentId)}/reingest`, { method: "POST" }),
+
+  deleteTicket: (ticketId: string) =>
+    request<{ status: string; ticket_id: string }>(knowledgeItem("tickets", ticketId), {
+      method: "DELETE",
+    }),
+
+  deleteDocument: (documentId: string) =>
+    request<{ status: string; document_id: string }>(knowledgeItem("documents", documentId), {
+      method: "DELETE",
+    }),
 };

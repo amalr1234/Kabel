@@ -3,7 +3,7 @@ import type { NextPage } from "next";
 import Layout from "@/components/Layout";
 import LoadingState from "@/components/LoadingState";
 import ErrorAlert from "@/components/ErrorAlert";
-import { api, type AuditEntry } from "@/lib/api";
+import { api, errorMessage, type AuditEntry } from "@/lib/api";
 
 const Page: NextPage = () => {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
@@ -23,7 +23,7 @@ const Page: NextPage = () => {
       setEntries(res.entries);
       setTotal(res.total);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setLoading(false);
     }

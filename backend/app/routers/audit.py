@@ -2,7 +2,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.database import get_db, SessionLocal
 from app.models import AuditLog as AuditLogModel
@@ -16,7 +16,7 @@ def _write_audit_event(
     event_type: str,
     actor: str,
     detail: str,
-) -> AuditLogModel:
+) -> dict:
     entry = AuditLogModel(
         event_type=event_type,
         actor=actor,
@@ -25,7 +25,10 @@ def _write_audit_event(
     db.add(entry)
     db.commit()
     db.refresh(entry)
-    return entry
+    return {
+        "id": entry.id,
+        "created_at": entry.created_at.isoformat(),
+    }
 
 
 def record_audit_event(
@@ -36,21 +39,8 @@ def record_audit_event(
     """
     Internal helper for application code outside FastAPI dependency injection.
     """
-    db = SessionLocal()
-
-    try:
-        entry = _write_audit_event(
-            db=db,
-            event_type=event_type,
-            actor=actor,
-            detail=detail,
-        )
-        return {
-            "id": entry.id,
-            "created_at": entry.created_at.isoformat(),
-        }
-    finally:
-        db.close()
+    with SessionLocal() as db:
+        return _write_audit_event(db, event_type, actor, detail)
 
 
 @router.post("", status_code=201)
@@ -60,16 +50,7 @@ def create_audit_event(
     detail: str,
     db: Session = Depends(get_db),
 ):
-    entry = _write_audit_event(
-        db=db,
-        event_type=event_type,
-        actor=actor,
-        detail=detail,
-    )
-    return {
-        "id": entry.id,
-        "created_at": entry.created_at.isoformat(),
-    }
+    return _write_audit_event(db, event_type, actor, detail)
 
 
 @router.get("", response_model=AuditListResponse)
@@ -79,20 +60,14 @@ def list_audit_events(
     event_type: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    stmt = select(AuditLogModel).order_by(
-        AuditLogModel.created_at.desc()
-    )
-
+    stmt = select(AuditLogModel)
     if event_type:
-        stmt = stmt.where(
-            AuditLogModel.event_type == event_type
-        )
+        stmt = stmt.where(AuditLogModel.event_type == event_type)
 
-    result = db.execute(
-        stmt.offset(offset).limit(limit)
-    )
-
-    entries = result.scalars().all()
+    total = db.execute(select(func.count()).select_from(stmt.subquery())).scalar() or 0
+    entries = db.execute(
+        stmt.order_by(AuditLogModel.created_at.desc()).offset(offset).limit(limit)
+    ).scalars().all()
 
     return AuditListResponse(
         entries=[
@@ -105,5 +80,5 @@ def list_audit_events(
             )
             for e in entries
         ],
-        total=len(entries),
+        total=total,
     )

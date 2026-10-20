@@ -1,64 +1,92 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { NextPage } from "next";
+import Link from "next/link";
 import Layout from "@/components/Layout";
 import LoadingState from "@/components/LoadingState";
 import ErrorAlert from "@/components/ErrorAlert";
 import ResultsPanel from "@/components/ResultsPanel";
-import { api, type SolutionQuery } from "@/lib/api";
+import { ENGINE_VIEWS, EngineDot, engineTooltip } from "@/components/EngineStatus";
+import {
+  API_BASE_URL,
+  api,
+  errorMessage,
+  type SolutionQuery,
+  type SolutionResponse,
+} from "@/lib/api";
+import {
+  CATEGORIES,
+  PRIORITIES,
+  STORAGE_KEYS,
+  SUPPORT_LEVELS,
+  SUPPORT_LEVEL_LABELS,
+  SYSTEMS,
+} from "@/lib/constants";
+import { useEngineStatus, type EngineState } from "@/lib/useEngineStatus";
 
-const PRIORITIES = ["low", "medium", "high", "critical"];
+const BACKEND_LABELS: Record<EngineState, string> = {
+  checking: "Checking backend...",
+  live: "Connected to backend",
+  demo: "Connected to backend (demo mode)",
+  degraded: "Connected, but some services are failing",
+  offline: "Backend unreachable",
+};
 
-const CATEGORIES = [
-  "authentication",
-  "performance",
-  "installation",
-  "upgrade",
-  "authorization",
-  "backup",
-  "transport",
-  "basis",
-];
+function persist(key: string, value: string | null) {
+  try {
+    if (value) {
+      window.localStorage.setItem(key, value);
+    } else {
+      window.localStorage.removeItem(key);
+    }
+  } catch (persistError) {
+    console.warn(`Unable to persist ${key}`, persistError);
+  }
+}
 
-const SYSTEMS = [
-  "SAP",
-  "S/4HANA",
-  "ABAP",
-  "HANA",
-  "NetWeaver",
-  "Fiori",
-  "CPI",
-  "Other",
-];
+type SearchDraft = {
+  query: string;
+  system: string;
+  category: string;
+  priority: string;
+  support_level: string;
+};
 
 const Page: NextPage = () => {
   const [query, setQuery] = useState("");
   const [system, setSystem] = useState("");
   const [category, setCategory] = useState("");
   const [priority, setPriority] = useState("");
+  const [supportLevel, setSupportLevel] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [solution, setSolution] = useState<
-    Awaited<ReturnType<typeof api.solve>> | null
-  >(null);
+  const [solution, setSolution] = useState<SolutionResponse | null>(null);
+  const [isHydrated, setIsHydrated] = useState(false);
+  const engine = useEngineStatus();
+  const engineView = ENGINE_VIEWS[engine.state];
 
-    const [isHydrated, setIsHydrated] = useState(false);
+  const resetForm = () => {
+    setQuery("");
+    setSystem("");
+    setCategory("");
+    setPriority("");
+    setSupportLevel("");
+  };
 
   useEffect(() => {
     try {
-      const savedQuery = window.localStorage.getItem("solvia:last-query");
-      const savedSolution = window.localStorage.getItem(
-        "solvia:last-solution"
-      );
+      const savedDraft = window.localStorage.getItem(STORAGE_KEYS.searchDraft);
 
-      if (savedQuery) {
-        setQuery(savedQuery);
+      if (savedDraft) {
+        const draft = JSON.parse(savedDraft) as Partial<SearchDraft>;
+        setQuery(draft.query ?? "");
+        setSystem(draft.system ?? "");
+        setCategory(draft.category ?? "");
+        setPriority(draft.priority ?? "");
+        setSupportLevel(draft.support_level ?? "");
       }
 
-      if (savedSolution) {
-        setSolution(
-          JSON.parse(savedSolution) as Awaited<ReturnType<typeof api.solve>>
-        );
-      }
+      // Ensure solution starts empty so the user always sees EmptyState initially
+      setSolution(null);
     } catch (restoreError) {
       console.warn("Unable to restore previous search", restoreError);
     } finally {
@@ -68,34 +96,20 @@ const Page: NextPage = () => {
 
   useEffect(() => {
     if (!isHydrated) return;
-
-    try {
-      if (query.trim()) {
-        window.localStorage.setItem("solvia:last-query", query);
-      } else {
-        window.localStorage.removeItem("solvia:last-query");
-      }
-    } catch (persistError) {
-      console.warn("Unable to persist search query", persistError);
-    }
-  }, [query, isHydrated]);
-
-  useEffect(() => {
-    if (!isHydrated) return;
-
-    try {
-      if (solution) {
-        window.localStorage.setItem(
-          "solvia:last-solution",
-          JSON.stringify(solution)
-        );
-      } else {
-        window.localStorage.removeItem("solvia:last-solution");
-      }
-    } catch (persistError) {
-      console.warn("Unable to persist search solution", persistError);
-    }
-  }, [solution, isHydrated]);
+    const hasDraft = Boolean(query.trim() || system || category || priority || supportLevel);
+    persist(
+      STORAGE_KEYS.searchDraft,
+      hasDraft
+        ? JSON.stringify({
+            query,
+            system,
+            category,
+            priority,
+            support_level: supportLevel,
+          } satisfies SearchDraft)
+        : null
+    );
+  }, [query, system, category, priority, supportLevel, isHydrated]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -111,13 +125,15 @@ const Page: NextPage = () => {
       system: system || null,
       category: category || null,
       priority: priority || null,
+      support_level: supportLevel || null,
     };
 
     try {
       const result = await api.solve(payload);
       setSolution(result);
+      resetForm();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -135,16 +151,20 @@ const Page: NextPage = () => {
             RAG
           </span>
 
-          <span className="ml-auto inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/5 px-3 py-1.5 text-xs text-emerald-300">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.9)]" />
-            Engine live
+          <span
+            className={`ml-auto inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs ${engineView.pill} ${engineView.text}`}
+            title={engineTooltip(engine)}
+          >
+            <EngineDot state={engine.state} className="h-1.5 w-1.5" />
+            Engine {engineView.label.toLowerCase()}
           </span>
         </div>
 
         <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-400">
           Describe the issue and SOLVIA will search the enterprise knowledge
-          library — historical tickets, SAP knowledge, and documentation — to
-          retrieve relevant evidence and propose a grounded remediation path.
+          library, including historical tickets, SAP knowledge, and
+          documentation, to retrieve relevant evidence and propose a grounded
+          remediation path.
         </p>
       </section>
 
@@ -182,23 +202,9 @@ const Page: NextPage = () => {
             placeholder="Example: User cannot login to SAP after password reset. System shows Authentication failed even though the password is correct."
             className="h-14 min-h-14 w-full resize-none overflow-y rounded-xl border border-white/10 bg-[#030817]/90 px-4 py-3 text-sm leading-7 text-white placeholder-slate-600 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-500/10"
           />
-
-          <div className="pointer-events-none absolute bottom-4 right-4 text-indigo-300/70">
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.7"
-            >
-              <path d="M12 3v18M3 12h18" />
-              <path d="m5 5 14 14M19 5 5 19" opacity=".45" />
-            </svg>
-          </div>
         </div>
 
-        <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <FilterSelect
             id="system"
             label="System"
@@ -225,16 +231,24 @@ const Page: NextPage = () => {
             placeholder="Any priority"
             options={PRIORITIES}
           />
+
+          <FilterSelect
+            id="support_level"
+            label="Support level"
+            value={supportLevel}
+            onChange={setSupportLevel}
+            placeholder="Any level"
+            options={[...SUPPORT_LEVELS]}
+            optionLabels={SUPPORT_LEVEL_LABELS}
+          />
         </div>
 
         <div className="mt-6 flex flex-col gap-4 border-t border-white/[0.08] pt-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2 text-xs text-slate-500">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-            Connected to local backend
+            <EngineDot state={engine.state} className="h-1.5 w-1.5" />
+            {BACKEND_LABELS[engine.state]}
             <span className="hidden text-slate-700 sm:inline">·</span>
-            <span className="hidden sm:inline">
-              {process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}
-            </span>
+            <span className="hidden sm:inline">{API_BASE_URL}</span>
           </div>
 
           <button
@@ -285,6 +299,7 @@ function FilterSelect({
   onChange,
   placeholder,
   options,
+  optionLabels,
 }: {
   id: string;
   label: string;
@@ -292,6 +307,7 @@ function FilterSelect({
   onChange: (value: string) => void;
   placeholder: string;
   options: string[];
+  optionLabels?: Record<string, string>;
 }) {
   return (
     <div>
@@ -311,7 +327,7 @@ function FilterSelect({
         <option value="">{placeholder}</option>
         {options.map((option) => (
           <option key={option} value={option}>
-            {option}
+            {optionLabels?.[option] ?? option}
           </option>
         ))}
       </select>
@@ -344,6 +360,12 @@ function EmptyState() {
         Enter an issue above and SOLVIA will retrieve evidence-based
         recommendations from the enterprise knowledge library.
       </p>
+      <Link
+        href="/knowledge"
+        className="mt-5 inline-flex text-sm font-semibold text-cyan-300"
+      >
+        Open Knowledge Library →
+      </Link>
     </div>
   );
 }

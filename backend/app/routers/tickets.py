@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func
+from sqlalchemy import select
 from typing import List, Optional
 
+from app.crud import find_ticket, get_ticket_or_404
 from app.database import get_db
+from app.ingest import ingest_ticket
 from app.models import Ticket as TicketModel
 from app.schemas import Ticket as TicketSchema
 
@@ -30,24 +32,17 @@ def list_tickets(
 
 @router.get("/{ticket_id}", response_model=TicketSchema)
 def get_ticket(ticket_id: str, db: Session = Depends(get_db)):
-    ticket = db.execute(
-        select(TicketModel).where(TicketModel.ticket_id == ticket_id)
-    ).scalars().first()
-    if not ticket:
-        raise HTTPException(status_code=404, detail="Ticket not found")
-    return ticket
+    return get_ticket_or_404(db, ticket_id)
 
 
 @router.post("", response_model=TicketSchema, status_code=201)
 def create_ticket(ticket: TicketSchema, db: Session = Depends(get_db)):
-    existing = db.execute(
-        select(TicketModel).where(TicketModel.ticket_id == ticket.ticket_id)
-    ).scalars().first()
-    if existing:
+    if find_ticket(db, ticket.ticket_id):
         raise HTTPException(status_code=409, detail="Ticket ID already exists")
 
-    db_ticket = TicketModel(**ticket.model_dump(mode="json"))
+    db_ticket = TicketModel(**ticket.model_dump(exclude={"id"}))
     db.add(db_ticket)
     db.commit()
     db.refresh(db_ticket)
+    ingest_ticket(db_ticket, db)
     return db_ticket
