@@ -1,6 +1,10 @@
 from app.ingest import ingest_ticket
 from app.database import SessionLocal
 from app.models import Ticket
+from app.database import ensure_schema
+
+# Create all missing database tables before running queries or inserts
+ensure_schema()
 
 tickets = [
     {
